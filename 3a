@@ -1,0 +1,614 @@
+# ============================================================
+# CLASSIFICATION USING ID3, J48, NAIVE BAYES AND k-NN
+# ============================================================
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+
+from sklearn.metrics import (
+    accuracy_score,
+    cohen_kappa_score,
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    roc_curve
+)
+
+# ============================================================
+# 1. ENTROPY FUNCTION
+# ============================================================
+
+def calculate_entropy(y):
+    values, counts = np.unique(y, return_counts=True)
+
+    probabilities = counts / counts.sum()
+
+    entropy = -np.sum(
+        probabilities * np.log2(probabilities)
+    )
+
+    return entropy
+
+
+# ============================================================
+# 2. LOAD IRIS DATASET
+# ============================================================
+
+iris = load_iris()
+
+X_iris = pd.DataFrame(
+    iris.data,
+    columns=[
+        "sepal_length",
+        "sepal_width",
+        "petal_length",
+        "petal_width"
+    ]
+)
+
+y_iris = pd.Series(
+    [iris.target_names[i] for i in iris.target],
+    name="class"
+)
+
+print("\n================================================")
+print("IRIS DATASET")
+print("================================================")
+
+print("Instances:", len(X_iris))
+print("Attributes:", list(X_iris.columns))
+print("Classes:", y_iris.unique())
+
+print("\nClass Distribution:")
+print(y_iris.value_counts())
+
+print("\nRoot Entropy:")
+print(calculate_entropy(y_iris))
+
+
+# ============================================================
+# 3. CREATE WEATHER DATASET
+# ============================================================
+
+weather = pd.DataFrame({
+    "outlook": [
+        "sunny", "sunny", "overcast", "rainy",
+        "rainy", "rainy", "overcast", "sunny",
+        "sunny", "rainy", "sunny", "overcast",
+        "overcast", "rainy"
+    ],
+
+    "temperature": [
+        "hot", "hot", "hot", "mild",
+        "cool", "cool", "cool", "mild",
+        "cool", "mild", "mild", "mild",
+        "hot", "mild"
+    ],
+
+    "humidity": [
+        "high", "high", "high", "high",
+        "normal", "normal", "normal", "high",
+        "normal", "normal", "normal", "high",
+        "normal", "high"
+    ],
+
+    "windy": [
+        "false", "true", "false", "false",
+        "false", "true", "true", "false",
+        "false", "false", "true", "true",
+        "false", "true"
+    ],
+
+    "play": [
+        "no", "no", "yes", "yes",
+        "yes", "no", "yes", "no",
+        "yes", "yes", "yes", "yes",
+        "yes", "no"
+    ]
+})
+
+print("\n================================================")
+print("WEATHER DATASET")
+print("================================================")
+
+print("Instances:", len(weather))
+print("Attributes:", list(weather.columns))
+print("Class Attribute: play")
+
+print("\nClass Distribution:")
+print(weather["play"].value_counts())
+
+print("\nRoot Entropy:")
+print(calculate_entropy(weather["play"]))
+
+
+# ============================================================
+# 4. PREPARE WEATHER DATA
+# ============================================================
+
+weather_encoded = pd.get_dummies(
+    weather.drop(columns=["play"])
+)
+
+label_encoder = LabelEncoder()
+
+y_weather = label_encoder.fit_transform(
+    weather["play"]
+)
+
+# ============================================================
+# 5. CROSS VALIDATION
+# ============================================================
+
+cv = StratifiedKFold(
+    n_splits=10,
+    shuffle=True,
+    random_state=42
+)
+
+
+# ============================================================
+# 6. FUNCTION TO EVALUATE CLASSIFIER
+# ============================================================
+
+def evaluate_classifier(
+    model,
+    X,
+    y,
+    class_names,
+    classifier_name,
+    dataset_name
+):
+
+    predictions = cross_val_predict(
+        model,
+        X,
+        y,
+        cv=cv,
+        method="predict"
+    )
+
+    probabilities = cross_val_predict(
+        model,
+        X,
+        y,
+        cv=cv,
+        method="predict_proba"
+    )
+
+    accuracy = accuracy_score(
+        y,
+        predictions
+    )
+
+    kappa = cohen_kappa_score(
+        y,
+        predictions
+    )
+
+    matrix = confusion_matrix(
+        y,
+        predictions
+    )
+
+    print("\n--------------------------------------------")
+    print(dataset_name, "-", classifier_name)
+    print("--------------------------------------------")
+
+    print("Accuracy:", round(accuracy * 100, 2), "%")
+    print("Kappa:", round(kappa, 4))
+
+    print("\nConfusion Matrix:")
+    print(matrix)
+
+    print("\nClassification Report:")
+    print(
+        classification_report(
+            y,
+            predictions,
+            target_names=class_names
+        )
+    )
+
+    # ROC AUC
+    if len(class_names) == 2:
+
+        auc = roc_auc_score(
+            y,
+            probabilities[:, 1]
+        )
+
+    else:
+
+        auc = roc_auc_score(
+            y,
+            probabilities,
+            multi_class="ovr",
+            average="macro"
+        )
+
+    print("ROC AUC:", round(auc, 4))
+
+    return {
+        "Dataset": dataset_name,
+        "Classifier": classifier_name,
+        "Accuracy": accuracy,
+        "Kappa": kappa,
+        "ROC_AUC": auc
+    }
+
+
+# ============================================================
+# 7. CLASSIFIERS
+# ============================================================
+
+id3 = DecisionTreeClassifier(
+    criterion="entropy",
+    random_state=42
+)
+
+j48 = DecisionTreeClassifier(
+    criterion="entropy",
+    max_depth=None,
+    random_state=42
+)
+
+naive_bayes = GaussianNB()
+
+knn = Pipeline([
+    ("scaler", StandardScaler()),
+    ("knn", KNeighborsClassifier(n_neighbors=3))
+])
+
+
+# ============================================================
+# 8. RUN CLASSIFIERS ON IRIS
+# ============================================================
+
+iris_results = []
+
+iris_results.append(
+    evaluate_classifier(
+        id3,
+        X_iris,
+        y_iris,
+        iris.target_names,
+        "ID3",
+        "Iris"
+    )
+)
+
+iris_results.append(
+    evaluate_classifier(
+        j48,
+        X_iris,
+        y_iris,
+        iris.target_names,
+        "J48",
+        "Iris"
+    )
+)
+
+iris_results.append(
+    evaluate_classifier(
+        naive_bayes,
+        X_iris,
+        y_iris,
+        iris.target_names,
+        "Naive Bayes",
+        "Iris"
+    )
+)
+
+iris_results.append(
+    evaluate_classifier(
+        knn,
+        X_iris,
+        y_iris,
+        iris.target_names,
+        "k-NN (IBk)",
+        "Iris"
+    )
+)
+
+
+# ============================================================
+# 9. TRAIN J48 AND DISPLAY TREE RULES
+# ============================================================
+
+j48.fit(
+    X_iris,
+    y_iris
+)
+
+print("\n================================================")
+print("J48 DECISION TREE RULES - IRIS")
+print("================================================")
+
+rules = export_text(
+    j48,
+    feature_names=list(X_iris.columns)
+)
+
+print(rules)
+
+
+# ============================================================
+# 10. WEATHER CLASSIFICATION
+# ============================================================
+
+weather_results = []
+
+weather_results.append(
+    evaluate_classifier(
+        id3,
+        weather_encoded,
+        y_weather,
+        label_encoder.classes_,
+        "ID3",
+        "Weather"
+    )
+)
+
+weather_results.append(
+    evaluate_classifier(
+        j48,
+        weather_encoded,
+        y_weather,
+        label_encoder.classes_,
+        "J48",
+        "Weather"
+    )
+)
+
+weather_results.append(
+    evaluate_classifier(
+        naive_bayes,
+        weather_encoded,
+        y_weather,
+        label_encoder.classes_,
+        "Naive Bayes",
+        "Weather"
+    )
+)
+
+weather_results.append(
+    evaluate_classifier(
+        knn,
+        weather_encoded,
+        y_weather,
+        label_encoder.classes_,
+        "k-NN (IBk)",
+        "Weather"
+    )
+)
+
+
+# ============================================================
+# 11. J48 RULES FOR WEATHER
+# ============================================================
+
+j48_weather = DecisionTreeClassifier(
+    criterion="entropy",
+    random_state=42
+)
+
+j48_weather.fit(
+    weather_encoded,
+    y_weather
+)
+
+print("\n================================================")
+print("J48 DECISION TREE - WEATHER")
+print("================================================")
+
+print(
+    export_text(
+        j48_weather,
+        feature_names=list(
+            weather_encoded.columns
+        )
+    )
+)
+
+
+# ============================================================
+# 12. ROC CURVE - IRIS
+# ============================================================
+
+def plot_roc_curve(
+    model,
+    X,
+    y,
+    class_names,
+    title
+):
+
+    probabilities = cross_val_predict(
+        model,
+        X,
+        y,
+        cv=cv,
+        method="predict_proba"
+    )
+
+    plt.figure()
+
+    if len(class_names) == 2:
+
+        fpr, tpr, _ = roc_curve(
+            y,
+            probabilities[:, 1]
+        )
+
+        auc = roc_auc_score(
+            y,
+            probabilities[:, 1]
+        )
+
+        plt.plot(
+            fpr,
+            tpr,
+            label=f"AUC = {auc:.3f}"
+        )
+
+    else:
+
+        for i, class_name in enumerate(
+            class_names
+        ):
+
+            y_binary = (
+                y == i
+            ).astype(int)
+
+            fpr, tpr, _ = roc_curve(
+                y_binary,
+                probabilities[:, i]
+            )
+
+            auc = roc_auc_score(
+                y_binary,
+                probabilities[:, i]
+            )
+
+            plt.plot(
+                fpr,
+                tpr,
+                label=f"{class_name} AUC={auc:.3f}"
+            )
+
+    plt.plot(
+        [0, 1],
+        [0, 1],
+        linestyle="--"
+    )
+
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+
+    plt.title(title)
+
+    plt.legend()
+
+    plt.show()
+
+
+# ============================================================
+# 13. ROC CURVES FOR IRIS CLASSIFIERS
+# ============================================================
+
+plot_roc_curve(
+    id3,
+    X_iris,
+    iris.target,
+    iris.target_names,
+    "ID3 - Iris ROC"
+)
+
+plot_roc_curve(
+    j48,
+    X_iris,
+    iris.target,
+    iris.target_names,
+    "J48 - Iris ROC"
+)
+
+plot_roc_curve(
+    naive_bayes,
+    X_iris,
+    iris.target,
+    iris.target_names,
+    "Naive Bayes - Iris ROC"
+)
+
+plot_roc_curve(
+    knn,
+    X_iris,
+    iris.target,
+    iris.target_names,
+    "k-NN - Iris ROC"
+)
+
+
+# ============================================================
+# 14. COMPARISON TABLE
+# ============================================================
+
+all_results = (
+    weather_results +
+    iris_results
+)
+
+results_df = pd.DataFrame(
+    all_results
+)
+
+results_df["Accuracy"] = (
+    results_df["Accuracy"] * 100
+).round(2)
+
+results_df["Kappa"] = (
+    results_df["Kappa"]
+).round(4)
+
+results_df["ROC_AUC"] = (
+    results_df["ROC_AUC"]
+).round(4)
+
+print("\n================================================")
+print("CLASSIFIER COMPARISON")
+print("================================================")
+
+print(
+    results_df.to_string(
+        index=False
+    )
+)
+
+
+# ============================================================
+# 15. FIND BEST CLASSIFIER
+# ============================================================
+
+for dataset in results_df["Dataset"].unique():
+
+    subset = results_df[
+        results_df["Dataset"] == dataset
+    ]
+
+    best = subset.loc[
+        subset["Accuracy"].idxmax()
+    ]
+
+    worst = subset.loc[
+        subset["Accuracy"].idxmin()
+    ]
+
+    print("\nDataset:", dataset)
+
+    print(
+        "Best Classifier:",
+        best["Classifier"],
+        "Accuracy:",
+        best["Accuracy"],
+        "%"
+    )
+
+    print(
+        "Worst Classifier:",
+        worst["Classifier"],
+        "Accuracy:",
+        worst["Accuracy"],
+        "%"
+    )
